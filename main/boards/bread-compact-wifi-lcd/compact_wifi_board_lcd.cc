@@ -17,6 +17,7 @@
 #include <lvgl.h>
 #include <string>
 #include <algorithm>
+#include <cstdlib>
 
 #if defined(LCD_TYPE_GC9A01_SERIAL)
 #include "esp_lcd_gc9a01.h"
@@ -79,7 +80,7 @@ public:
                      bool mirror_x, bool mirror_y, bool swap_xy)
         : SpiLcdDisplay(panel_io, panel, width, height, offset_x, offset_y, mirror_x, mirror_y, swap_xy) {}
 
-    ~RobotEyesDisplay() {
+    virtual ~RobotEyesDisplay() {
         if (anim_timer_) {
             lv_timer_delete(anim_timer_);
             anim_timer_ = nullptr;
@@ -208,7 +209,9 @@ public:
             int step = (frame_count_ / 2) % 8;
             int active = (step > 4) ? (8 - step) : step;
             for (int i = 0; i < NUM_MOUTH_BARS; i++) {
-                bar_heights[i] = (i == active) ? 22 : (abs(i - active) == 1 ? 12 : 5);
+                int diff = i - active;
+                if (diff < 0) diff = -diff;
+                bar_heights[i] = (diff == 0) ? 22 : (diff == 1 ? 12 : 5);
             }
         } else if (emotion_ == "listening") {
             // Attentive breathing waveform
@@ -307,15 +310,7 @@ public:
     // Prevents LcdDisplay::SetTheme() from dereferencing uninitialized status/battery/mute labels
     virtual void SetTheme(Theme* theme) override {
         DisplayLockGuard lock(this);
-        current_theme_ = theme;
-    }
-
-    virtual bool SetTextFont(std::shared_ptr<LvglFont> text_font) override {
-        DisplayLockGuard lock(this);
-        if (status_label_ && text_font && text_font->font()) {
-            lv_obj_set_style_text_font(status_label_, text_font->font(), 0);
-        }
-        return true;
+        Display::SetTheme(theme);
     }
 
     virtual void SetStatus(const char* status) override {
