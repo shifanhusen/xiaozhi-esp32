@@ -10,6 +10,7 @@
 #include "led/single_led.h"
 
 #include <esp_log.h>
+#include <esp_wifi.h>
 #include <esp_lcd_panel_vendor.h>
 #include <esp_lcd_panel_io.h>
 #include <esp_lcd_panel_ops.h>
@@ -53,6 +54,12 @@ static const gc9a01_lcd_init_cmd_t gc9107_lcd_init_cmds[] = {
 
 class RobotEyesDisplay : public SpiLcdDisplay {
 private:
+    // ESP-VoCat / EchoEar Animated Pet Ears
+    lv_obj_t* ear_l_ = nullptr;
+    lv_obj_t* ear_r_ = nullptr;
+    lv_obj_t* inner_ear_l_ = nullptr;
+    lv_obj_t* inner_ear_r_ = nullptr;
+
     // Eye body squircles
     lv_obj_t* left_eye_ = nullptr;
     lv_obj_t* right_eye_ = nullptr;
@@ -69,9 +76,15 @@ private:
     lv_obj_t* left_bottom_lid_ = nullptr;
     lv_obj_t* right_bottom_lid_ = nullptr;
 
-    // Cute Anime/Cozmo rosy cheek blush spots (soft glowing pink ovals)
+    // Cute Anime/VoCat rosy cheek blush spots (soft glowing pink ovals)
     lv_obj_t* blush_l_ = nullptr;
     lv_obj_t* blush_r_ = nullptr;
+
+    // Sleek pet whiskers
+    lv_obj_t* whisker_l1_ = nullptr;
+    lv_obj_t* whisker_l2_ = nullptr;
+    lv_obj_t* whisker_r1_ = nullptr;
+    lv_obj_t* whisker_r2_ = nullptr;
 
     // Tear drop object for sad/crying expressions
     lv_obj_t* tear_ = nullptr;
@@ -80,6 +93,9 @@ private:
     lv_obj_t* mouth_ = nullptr;
     lv_obj_t* mouth_corner_l_ = nullptr;
     lv_obj_t* mouth_corner_r_ = nullptr;
+
+    // EchoEar-style Acoustic Soundwave Bars for Listening Mode
+    lv_obj_t* wave_bar_[5] = {nullptr, nullptr, nullptr, nullptr, nullptr};
 
     // Subtitle label
     lv_obj_t* status_label_ = nullptr;
@@ -96,6 +112,7 @@ private:
     int blink_stage_ = 0; // 0=open, 1..4=blink frames
     int blink_interval_ = 110;
     int double_blink_counter_ = 0;
+    int pet_reaction_frames_ = 0;
 
     // Saccadic gaze simulation (biological rapid eye jumps)
     int saccade_target_x_ = 0;
@@ -129,6 +146,11 @@ public:
         }
     }
 
+    void TriggerPetReaction() {
+        DisplayLockGuard lock(this);
+        pet_reaction_frames_ = 45; // ~1.5s playful interaction
+    }
+
     virtual void SetupUI() override {
         DisplayLockGuard lock(this);
         auto screen = lv_screen_active();
@@ -137,7 +159,87 @@ public:
 
         lv_color_t col = lv_color_hex(color_);
 
-        // --- 1. Cheek Blush Spots (Cute glowing ovals for happy/shy/loving) ---
+        // --- 1. ESP-VoCat Animated Pet Ears (Top rim of circular display) ---
+        ear_l_ = lv_obj_create(screen);
+        lv_obj_set_size(ear_l_, 22, 26);
+        lv_obj_set_pos(ear_l_, 68, 20);
+        lv_obj_set_style_radius(ear_l_, 7, 0);
+        lv_obj_set_style_bg_color(ear_l_, col, 0);
+        lv_obj_set_style_bg_opa(ear_l_, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(ear_l_, 0, 0);
+        lv_obj_set_style_transform_rotation(ear_l_, -220, 0);
+        lv_obj_set_scrollbar_mode(ear_l_, LV_SCROLLBAR_MODE_OFF);
+
+        inner_ear_l_ = lv_obj_create(ear_l_);
+        lv_obj_set_size(inner_ear_l_, 10, 14);
+        lv_obj_set_pos(inner_ear_l_, 6, 6);
+        lv_obj_set_style_radius(inner_ear_l_, 4, 0);
+        lv_obj_set_style_bg_color(inner_ear_l_, lv_color_hex(0xFF80AB), 0);
+        lv_obj_set_style_bg_opa(inner_ear_l_, LV_OPA_70, 0);
+        lv_obj_set_style_border_width(inner_ear_l_, 0, 0);
+        lv_obj_set_scrollbar_mode(inner_ear_l_, LV_SCROLLBAR_MODE_OFF);
+
+        ear_r_ = lv_obj_create(screen);
+        lv_obj_set_size(ear_r_, 22, 26);
+        lv_obj_set_pos(ear_r_, 150, 20);
+        lv_obj_set_style_radius(ear_r_, 7, 0);
+        lv_obj_set_style_bg_color(ear_r_, col, 0);
+        lv_obj_set_style_bg_opa(ear_r_, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(ear_r_, 0, 0);
+        lv_obj_set_style_transform_rotation(ear_r_, 220, 0);
+        lv_obj_set_scrollbar_mode(ear_r_, LV_SCROLLBAR_MODE_OFF);
+
+        inner_ear_r_ = lv_obj_create(ear_r_);
+        lv_obj_set_size(inner_ear_r_, 10, 14);
+        lv_obj_set_pos(inner_ear_r_, 6, 6);
+        lv_obj_set_style_radius(inner_ear_r_, 4, 0);
+        lv_obj_set_style_bg_color(inner_ear_r_, lv_color_hex(0xFF80AB), 0);
+        lv_obj_set_style_bg_opa(inner_ear_r_, LV_OPA_70, 0);
+        lv_obj_set_style_border_width(inner_ear_r_, 0, 0);
+        lv_obj_set_scrollbar_mode(inner_ear_r_, LV_SCROLLBAR_MODE_OFF);
+
+        // --- 2. Whiskers (Sleek Pet Accents on Cheeks) ---
+        whisker_l1_ = lv_obj_create(screen);
+        lv_obj_set_size(whisker_l1_, 16, 2);
+        lv_obj_set_pos(whisker_l1_, 20, 134);
+        lv_obj_set_style_radius(whisker_l1_, 1, 0);
+        lv_obj_set_style_bg_color(whisker_l1_, col, 0);
+        lv_obj_set_style_bg_opa(whisker_l1_, LV_OPA_50, 0);
+        lv_obj_set_style_border_width(whisker_l1_, 0, 0);
+        lv_obj_set_style_transform_rotation(whisker_l1_, 100, 0);
+        lv_obj_set_scrollbar_mode(whisker_l1_, LV_SCROLLBAR_MODE_OFF);
+
+        whisker_l2_ = lv_obj_create(screen);
+        lv_obj_set_size(whisker_l2_, 14, 2);
+        lv_obj_set_pos(whisker_l2_, 22, 142);
+        lv_obj_set_style_radius(whisker_l2_, 1, 0);
+        lv_obj_set_style_bg_color(whisker_l2_, col, 0);
+        lv_obj_set_style_bg_opa(whisker_l2_, LV_OPA_50, 0);
+        lv_obj_set_style_border_width(whisker_l2_, 0, 0);
+        lv_obj_set_style_transform_rotation(whisker_l2_, -80, 0);
+        lv_obj_set_scrollbar_mode(whisker_l2_, LV_SCROLLBAR_MODE_OFF);
+
+        whisker_r1_ = lv_obj_create(screen);
+        lv_obj_set_size(whisker_r1_, 16, 2);
+        lv_obj_set_pos(whisker_r1_, 204, 134);
+        lv_obj_set_style_radius(whisker_r1_, 1, 0);
+        lv_obj_set_style_bg_color(whisker_r1_, col, 0);
+        lv_obj_set_style_bg_opa(whisker_r1_, LV_OPA_50, 0);
+        lv_obj_set_style_border_width(whisker_r1_, 0, 0);
+        lv_obj_set_style_transform_rotation(whisker_r1_, -100, 0);
+        lv_obj_set_scrollbar_mode(whisker_r1_, LV_SCROLLBAR_MODE_OFF);
+
+        whisker_r2_ = lv_obj_create(screen);
+        lv_obj_set_size(whisker_r2_, 14, 2);
+        lv_obj_set_pos(whisker_r2_, 204, 142);
+        lv_obj_set_style_radius(whisker_r2_, 1, 0);
+        lv_obj_set_style_bg_color(whisker_r2_, col, 0);
+        lv_obj_set_style_bg_opa(whisker_r2_, LV_OPA_50, 0);
+        lv_obj_set_style_border_width(whisker_r2_, 0, 0);
+        lv_obj_set_style_transform_rotation(whisker_r2_, 80, 0);
+        lv_obj_set_scrollbar_mode(whisker_r2_, LV_SCROLLBAR_MODE_OFF);
+
+        // --- 3. Cheek Blush Spots (Cute glowing ovals for happy/shy/loving) ---
         blush_l_ = lv_obj_create(screen);
         lv_obj_set_size(blush_l_, 24, 12);
         lv_obj_set_pos(blush_l_, 34, 142);
@@ -156,7 +258,7 @@ public:
         lv_obj_set_style_border_width(blush_r_, 0, 0);
         lv_obj_set_scrollbar_mode(blush_r_, LV_SCROLLBAR_MODE_OFF);
 
-        // --- 2. Left Eye Main Body (Neon Squircle with Bloom Glow) ---
+        // --- 4. Left Eye Main Body (Neon Squircle with Bloom Glow) ---
         left_eye_ = lv_obj_create(screen);
         lv_obj_set_size(left_eye_, EYE_WIDTH, EYE_HEIGHT);
         lv_obj_set_pos(left_eye_, LEFT_EYE_X, EYE_Y);
@@ -190,7 +292,7 @@ public:
         lv_obj_set_style_border_width(left_glare2_, 0, 0);
         lv_obj_set_scrollbar_mode(left_glare2_, LV_SCROLLBAR_MODE_OFF);
 
-        // --- 3. Right Eye Main Body (Neon Squircle with Bloom Glow) ---
+        // --- 5. Right Eye Main Body (Neon Squircle with Bloom Glow) ---
         right_eye_ = lv_obj_create(screen);
         lv_obj_set_size(right_eye_, EYE_WIDTH, EYE_HEIGHT);
         lv_obj_set_pos(right_eye_, RIGHT_EYE_X, EYE_Y);
@@ -224,7 +326,7 @@ public:
         lv_obj_set_style_border_width(right_glare2_, 0, 0);
         lv_obj_set_scrollbar_mode(right_glare2_, LV_SCROLLBAR_MODE_OFF);
 
-        // --- 4. Dynamic Eyelid Masks (OLED-Black Overlays for Expressions) ---
+        // --- 6. Dynamic Eyelid Masks (OLED-Black Overlays for Expressions) ---
         // Top Lids (for blinks, sleepy, and angled brows with rotation support)
         left_top_lid_ = lv_obj_create(screen);
         lv_obj_set_size(left_top_lid_, EYE_WIDTH + 14, 0);
@@ -261,7 +363,7 @@ public:
         lv_obj_set_style_border_width(right_bottom_lid_, 0, 0);
         lv_obj_set_scrollbar_mode(right_bottom_lid_, LV_SCROLLBAR_MODE_OFF);
 
-        // --- 5. Tear Drop (for Sad/Crying Expressions) ---
+        // --- 7. Tear Drop (for Sad/Crying Expressions) ---
         tear_ = lv_obj_create(screen);
         lv_obj_set_size(tear_, 6, 12);
         lv_obj_set_pos(tear_, LEFT_EYE_X + 18, EYE_Y + EYE_HEIGHT);
@@ -271,7 +373,7 @@ public:
         lv_obj_set_style_border_width(tear_, 0, 0);
         lv_obj_set_scrollbar_mode(tear_, LV_SCROLLBAR_MODE_OFF);
 
-        // --- 6. Morphing Animated Mouth ---
+        // --- 8. Morphing Animated Mouth ---
         mouth_ = lv_obj_create(screen);
         lv_obj_set_size(mouth_, 44, 6);
         lv_obj_set_pos(mouth_, 98, MOUTH_Y);
@@ -302,7 +404,20 @@ public:
         lv_obj_set_style_border_width(mouth_corner_r_, 0, 0);
         lv_obj_set_scrollbar_mode(mouth_corner_r_, LV_SCROLLBAR_MODE_OFF);
 
-        // --- 7. Subtitle Status Label (Centered at bottom curve) ---
+        // --- 9. EchoEar Acoustic Soundwave Bars for Listening Mode ---
+        static const int wave_x[5] = {100, 108, 116, 124, 132};
+        for (int i = 0; i < 5; ++i) {
+            wave_bar_[i] = lv_obj_create(screen);
+            lv_obj_set_size(wave_bar_[i], 4, 8);
+            lv_obj_set_pos(wave_bar_[i], wave_x[i], MOUTH_Y);
+            lv_obj_set_style_radius(wave_bar_[i], 2, 0);
+            lv_obj_set_style_bg_color(wave_bar_[i], col, 0);
+            lv_obj_set_style_bg_opa(wave_bar_[i], LV_OPA_0, 0);
+            lv_obj_set_style_border_width(wave_bar_[i], 0, 0);
+            lv_obj_set_scrollbar_mode(wave_bar_[i], LV_SCROLLBAR_MODE_OFF);
+        }
+
+        // --- 10. Subtitle Status Label (Centered at bottom curve) ---
         status_label_ = lv_label_create(screen);
         lv_obj_set_width(status_label_, 190);
         lv_obj_set_pos(status_label_, 25, 204);
@@ -310,7 +425,7 @@ public:
         lv_obj_set_style_text_color(status_label_, lv_color_hex(0x888888), 0);
         lv_label_set_text(status_label_, "");
 
-        // --- 8. 30 FPS Animation Timer (33ms) ---
+        // --- 11. 30 FPS Animation Timer (33ms) ---
         anim_timer_ = lv_timer_create([](lv_timer_t* t) {
             auto self = static_cast<RobotEyesDisplay*>(lv_timer_get_user_data(t));
             if (self) self->UpdateAnimation();
@@ -322,9 +437,13 @@ public:
     void UpdateAnimation() {
         frame_count_++;
 
+        // Pet reaction active timer
+        if (pet_reaction_frames_ > 0) {
+            pet_reaction_frames_--;
+        }
+
         // --- 1. Saccadic Gaze Engine (Natural Micro-Looks & Glances) ---
         if (frame_count_ >= next_saccade_frame_) {
-            // Schedule next saccade between 2.5s and 4.5s
             next_saccade_frame_ = frame_count_ + 75 + (frame_count_ % 65);
             int rnd = (frame_count_ / 17) % 6;
             if (rnd == 0) {
@@ -364,7 +483,7 @@ public:
         }
 
         int top_lid_h = 0;
-        int blink_squash_w = 0; // Eye expands width slightly when squashed!
+        int blink_squash_w = 0;
 
         if (blink_stage_ == 1) { // Closing fast
             top_lid_h = EYE_HEIGHT * 6 / 10;
@@ -381,16 +500,52 @@ public:
         } else if (blink_stage_ == 4) { // Reopened
             top_lid_h = 0;
             blink_squash_w = 0;
-            // Playful double-blink flutter every 3rd blink cycle
             if ((double_blink_counter_ % 3 == 0) && (double_blink_counter_ % 6 != 0)) {
-                blink_stage_ = 1;
+                blink_stage_ = 1; // Playful double-blink flutter
                 double_blink_counter_++;
             } else {
                 blink_stage_ = 0;
             }
         }
 
-        // --- 3. Mood-Specific Morphing, Rotation, & Dynamic Shapes ---
+        // --- 3. ESP-VoCat Pet Ear Kinematics ---
+        int ear_rot_l = -220;
+        int ear_rot_r = 220;
+        int ear_y = 20 + breath_y;
+
+        if (pet_reaction_frames_ > 0) {
+            // Pet reaction: happy rapid ear flutter!
+            int flick = (frame_count_ % 6 < 3) ? 50 : -30;
+            ear_rot_l = -220 + flick;
+            ear_rot_r = 220 - flick;
+            ear_y = 18;
+        } else if (emotion_ == "listening") {
+            // Ears perk straight up attentively!
+            ear_rot_l = -100;
+            ear_rot_r = 100;
+            ear_y = 18;
+        } else if (emotion_ == "sleepy" || emotion_ == "tired") {
+            // Ears droop downward sleepily
+            ear_rot_l = -340;
+            ear_rot_r = 340;
+            ear_y = 24;
+        } else if (emotion_ == "happy" || emotion_ == "laughing" || emotion_ == "funny") {
+            ear_rot_l = -180;
+            ear_rot_r = 180;
+            ear_y = (frame_count_ % 10 < 5) ? 18 : 20;
+        } else if (blink_stage_ > 0 && double_blink_counter_ % 2 == 0) {
+            // Cute ear twitch during double blinks
+            ear_rot_l = -160;
+        }
+
+        if (ear_l_ && ear_r_) {
+            lv_obj_set_pos(ear_l_, 68, ear_y);
+            lv_obj_set_pos(ear_r_, 150, ear_y);
+            lv_obj_set_style_transform_rotation(ear_l_, ear_rot_l, 0);
+            lv_obj_set_style_transform_rotation(ear_r_, ear_rot_r, 0);
+        }
+
+        // --- 4. Mood-Specific Morphing, Rotation, & Dynamic Shapes ---
         int eye_w = EYE_WIDTH + blink_squash_w;
         int eye_h = EYE_HEIGHT;
         int left_y_offset = 0;
@@ -401,70 +556,63 @@ public:
         int bounce_y = 0;
         lv_opa_t blush_opa = LV_OPA_0;
 
-        if (emotion_ == "happy") {
-            // Joyful smiling crescents (^ ^): bottom eyelids rise smoothly with high curve
+        if (pet_reaction_frames_ > 0) {
+            // Interactive pet reaction: joyful wink & blush!
+            bottom_lid_h = 44;
+            top_lid_h = (top_lid_h > 12) ? top_lid_h : 10;
+            blush_opa = LV_OPA_90;
+            bounce_y = (frame_count_ % 8 < 4) ? -2 : 0;
+        } else if (emotion_ == "happy") {
             bottom_lid_h = 44;
             top_lid_h = (top_lid_h > 12) ? top_lid_h : 10;
             blush_opa = LV_OPA_70;
             bounce_y = (frame_count_ % 30 < 15) ? -1 : 0;
         } else if (emotion_ == "laughing" || emotion_ == "funny") {
-            // Laughing: squinted happy crescents with bouncy vibration!
             bottom_lid_h = 48;
             top_lid_h = (top_lid_h > 20) ? top_lid_h : 18;
             blush_opa = LV_OPA_80;
-            bounce_y = (frame_count_ % 6 < 3) ? -2 : 2; // Fast laughter shake
+            bounce_y = (frame_count_ % 6 < 3) ? -2 : 2;
         } else if (emotion_ == "angry") {
-            // Stern inward-slanted V-brows (14 deg inward rotation!)
             top_lid_rot_l = 140;
             top_lid_rot_r = -140;
             top_lid_h = (top_lid_h > 36) ? top_lid_h : 36;
-            // Eyes narrow and converge slightly for intense focus
             eye_w = EYE_WIDTH - 2;
         } else if (emotion_ == "thinking") {
-            // Inquisitive asymmetrical eyebrow cock! (Classic Pixar "Rock" brow)
-            left_y_offset = -7;  // Left eye raises high
-            right_y_offset = 3;  // Right eye narrows
-            top_lid_rot_l = -100; // Left brow tilts quizzically
+            left_y_offset = -7;
+            right_y_offset = 3;
+            top_lid_rot_l = -100;
             top_lid_h = (top_lid_h > 16) ? top_lid_h : 16;
-            saccade_cur_x_ = -10; // Gaze locked to upper-left
+            saccade_cur_x_ = -10;
             saccade_cur_y_ = -5;
         } else if (emotion_ == "shocked" || emotion_ == "surprised") {
-            // Shocked wide eyes: stretch tall and wide, lids fully retracted!
             eye_w = EYE_WIDTH + 6;
             eye_h = EYE_HEIGHT + 8;
             top_lid_h = 0;
             bottom_lid_h = 0;
-            bounce_y = (frame_count_ % 4 < 2) ? -1 : 1; // Shock jitter
+            bounce_y = (frame_count_ % 4 < 2) ? -1 : 1;
         } else if (emotion_ == "sad" || emotion_ == "crying") {
-            // Melancholy drooping brows: 12 deg outward rotation
             top_lid_rot_l = -120;
             top_lid_rot_r = 120;
             top_lid_h = (top_lid_h > 30) ? top_lid_h : 30;
             left_y_offset = 3;
             right_y_offset = 3;
-            // Teardrop animation for crying
             if (emotion_ == "crying" && tear_) {
                 tear_y_ = (tear_y_ + 2) % 45;
                 lv_obj_set_pos(tear_, LEFT_EYE_X + 22, EYE_Y + EYE_HEIGHT + tear_y_ - 6);
                 lv_obj_set_style_bg_opa(tear_, (tear_y_ > 38) ? LV_OPA_30 : LV_OPA_80, 0);
             }
         } else if (emotion_ == "sleepy" || emotion_ == "tired") {
-            // Heavy drowsy eyelids covering 72%
             top_lid_h = (top_lid_h > 58) ? top_lid_h : 58;
-            // Very slow deep breathing heave
             breath_y = (frame_count_ % 90 < 45) ? 0 : 2;
         } else if (emotion_ == "loving" || emotion_ == "heart" || emotion_ == "shy") {
-            // Soft rosy blush cheeks at 80% opacity
             blush_opa = LV_OPA_80;
             bottom_lid_h = 32;
             top_lid_h = (top_lid_h > 10) ? top_lid_h : 8;
         } else if (emotion_ == "listening") {
-            // Attentive wide eyes
             eye_h = EYE_HEIGHT + 3;
             top_lid_h = (top_lid_h > 0) ? top_lid_h : 0;
         }
 
-        // Hide tear if not crying
         if (emotion_ != "crying" && tear_) {
             lv_obj_set_style_bg_opa(tear_, LV_OPA_0, 0);
             tear_y_ = 0;
@@ -476,7 +624,7 @@ public:
             lv_obj_set_style_bg_opa(blush_r_, blush_opa, 0);
         }
 
-        // --- 4. Render Left Eye & Dynamic Sculptors ---
+        // --- 5. Render Left Eye & Dynamic Sculptors ---
         if (left_eye_ && left_top_lid_ && left_bottom_lid_) {
             int cur_lx = LEFT_EYE_X + saccade_cur_x_ - (eye_w - EYE_WIDTH) / 2;
             int cur_ly = EYE_Y + breath_y + bounce_y + left_y_offset;
@@ -484,7 +632,6 @@ public:
             lv_obj_set_pos(left_eye_, cur_lx, cur_ly);
             lv_obj_set_size(left_eye_, eye_w, eye_h);
 
-            // Specular Glints Parallax (Creating 3D Ocular Depth)
             if (left_glare1_) {
                 int g1_x = 8 + (saccade_cur_x_ * 3) / 10;
                 int g1_y = 8 + (saccade_cur_y_ * 3) / 10;
@@ -496,17 +643,15 @@ public:
                 lv_obj_set_pos(left_glare2_, g2_x, g2_y);
             }
 
-            // Top Lid Mask (with Angle Rotation)
             lv_obj_set_pos(left_top_lid_, cur_lx - 7, cur_ly - 6);
             lv_obj_set_size(left_top_lid_, eye_w + 14, top_lid_h);
             lv_obj_set_style_transform_rotation(left_top_lid_, top_lid_rot_l, 0);
 
-            // Bottom Lid Mask (Smile Crescent)
             lv_obj_set_pos(left_bottom_lid_, cur_lx - 8, cur_ly + eye_h - bottom_lid_h);
             lv_obj_set_size(left_bottom_lid_, eye_w + 16, bottom_lid_h + 6);
         }
 
-        // --- 5. Render Right Eye & Dynamic Sculptors ---
+        // --- 6. Render Right Eye & Dynamic Sculptors ---
         if (right_eye_ && right_top_lid_ && right_bottom_lid_) {
             int cur_rx = RIGHT_EYE_X + saccade_cur_x_ - (eye_w - EYE_WIDTH) / 2;
             int cur_ry = EYE_Y + breath_y + bounce_y + right_y_offset;
@@ -514,7 +659,6 @@ public:
             lv_obj_set_pos(right_eye_, cur_rx, cur_ry);
             lv_obj_set_size(right_eye_, eye_w, eye_h);
 
-            // Specular Glints Parallax
             if (right_glare1_) {
                 int g1_x = 8 + (saccade_cur_x_ * 3) / 10;
                 int g1_y = 8 + (saccade_cur_y_ * 3) / 10;
@@ -526,87 +670,103 @@ public:
                 lv_obj_set_pos(right_glare2_, g2_x, g2_y);
             }
 
-            // Top Lid Mask (with Angle Rotation)
             lv_obj_set_pos(right_top_lid_, cur_rx - 7, cur_ry - 6);
             lv_obj_set_size(right_top_lid_, eye_w + 14, top_lid_h);
             lv_obj_set_style_transform_rotation(right_top_lid_, top_lid_rot_r, 0);
 
-            // Bottom Lid Mask (Smile Crescent)
             lv_obj_set_pos(right_bottom_lid_, cur_rx - 8, cur_ry + eye_h - bottom_lid_h);
             lv_obj_set_size(right_bottom_lid_, eye_w + 16, bottom_lid_h + 6);
         }
 
-        // --- 6. Morphing Multi-Segment Animated Mouth ---
+        // --- 7. Morphing Mouth & EchoEar Soundwave Visualizer ---
         int mouth_w = 42;
         int mouth_h = 5;
         int corner_y_offset = 0;
 
-        if (emotion_ == "speaking") {
-            // Conversational talking mouth animation synced with speech cadence
-            mouth_phase_ = (mouth_phase_ + 1) % 12;
-            static const int speech_h[12] = {4, 10, 18, 24, 16, 10, 5, 14, 22, 16, 8, 4};
-            static const int speech_w[12] = {40, 46, 52, 56, 48, 44, 42, 48, 54, 48, 42, 40};
-            mouth_h = speech_h[mouth_phase_];
-            mouth_w = speech_w[mouth_phase_];
-            corner_y_offset = (mouth_h > 12) ? -2 : 0;
-            // Whole face subtly squashes and stretches with voice
-            if (mouth_h > 16 && left_eye_ && right_eye_) {
-                lv_obj_set_size(left_eye_, eye_w + 1, eye_h - 1);
-                lv_obj_set_size(right_eye_, eye_w + 1, eye_h - 1);
+        bool is_listening = (emotion_ == "listening");
+
+        // Toggle Acoustic Soundwave vs Normal Mouth
+        for (int i = 0; i < 5; ++i) {
+            if (wave_bar_[i]) {
+                if (is_listening) {
+                    lv_obj_set_style_bg_opa(wave_bar_[i], LV_OPA_COVER, 0);
+                    static const int base_h[5] = {6, 12, 18, 12, 6};
+                    int pulse = (frame_count_ * 4 + i * 2) % 10;
+                    int h = base_h[i] + ((pulse > 5) ? (10 - pulse) : pulse);
+                    lv_obj_set_size(wave_bar_[i], 4, h);
+                    lv_obj_set_pos(wave_bar_[i], 100 + i * 8, MOUTH_Y - h / 2);
+                } else {
+                    lv_obj_set_style_bg_opa(wave_bar_[i], LV_OPA_0, 0);
+                }
             }
-        } else if (emotion_ == "happy" || emotion_ == "laughing" || emotion_ == "funny") {
-            // Upward curved cheerful smile
-            mouth_w = 54;
-            mouth_h = (emotion_ == "laughing" || emotion_ == "funny") ? 14 : 6;
-            corner_y_offset = -7; // Smile corners tilt upwards!
-        } else if (emotion_ == "angry") {
-            // Stern scowl grimace
-            mouth_w = 48;
-            mouth_h = 5;
-            corner_y_offset = 6;  // Frown corners turn down!
-        } else if (emotion_ == "sad" || emotion_ == "crying") {
-            // Melancholy downturn
-            mouth_w = 38;
-            mouth_h = 4;
-            corner_y_offset = 6;
-        } else if (emotion_ == "shocked" || emotion_ == "surprised") {
-            // Round "O" gasp
-            mouth_w = 20;
-            mouth_h = 22;
-        } else if (emotion_ == "listening") {
-            // Soft acoustic breathing aperture
-            int pulse = (frame_count_ / 4) % 6;
-            mouth_h = (pulse > 3) ? (6 - pulse) * 2 + 4 : pulse * 2 + 4;
-            mouth_w = 36;
-        } else if (emotion_ == "thinking") {
-            // Subtle thinking line
-            mouth_w = 32;
-            mouth_h = 4;
-            corner_y_offset = (frame_count_ % 30 < 15) ? -2 : 2;
-        } else if (emotion_ == "loving" || emotion_ == "shy") {
-            // Soft sweet smile
-            mouth_w = 42;
-            mouth_h = 5;
-            corner_y_offset = -4;
         }
 
-        if (mouth_ && mouth_corner_l_ && mouth_corner_r_) {
-            int mx = 120 - mouth_w / 2;
-            int my = MOUTH_Y - mouth_h / 2;
+        if (is_listening) {
+            // Hide standard mouth during soundwave display
+            if (mouth_) lv_obj_set_style_bg_opa(mouth_, LV_OPA_0, 0);
+            if (mouth_corner_l_) lv_obj_set_style_bg_opa(mouth_corner_l_, LV_OPA_0, 0);
+            if (mouth_corner_r_) lv_obj_set_style_bg_opa(mouth_corner_r_, LV_OPA_0, 0);
+        } else {
+            if (mouth_) lv_obj_set_style_bg_opa(mouth_, LV_OPA_COVER, 0);
 
-            lv_obj_set_pos(mouth_, mx, my);
-            lv_obj_set_size(mouth_, mouth_w, mouth_h);
-            lv_obj_set_style_radius(mouth_, mouth_h / 2, 0);
+            if (pet_reaction_frames_ > 0) {
+                // Cheerful open smile
+                mouth_w = 54;
+                mouth_h = 10;
+                corner_y_offset = -6;
+            } else if (emotion_ == "speaking") {
+                mouth_phase_ = (mouth_phase_ + 1) % 12;
+                static const int speech_h[12] = {4, 10, 18, 24, 16, 10, 5, 14, 22, 16, 8, 4};
+                static const int speech_w[12] = {40, 46, 52, 56, 48, 44, 42, 48, 54, 48, 42, 40};
+                mouth_h = speech_h[mouth_phase_];
+                mouth_w = speech_w[mouth_phase_];
+                corner_y_offset = (mouth_h > 12) ? -2 : 0;
+                if (mouth_h > 16 && left_eye_ && right_eye_) {
+                    lv_obj_set_size(left_eye_, eye_w + 1, eye_h - 1);
+                    lv_obj_set_size(right_eye_, eye_w + 1, eye_h - 1);
+                }
+            } else if (emotion_ == "happy" || emotion_ == "laughing" || emotion_ == "funny") {
+                mouth_w = 54;
+                mouth_h = (emotion_ == "laughing" || emotion_ == "funny") ? 14 : 6;
+                corner_y_offset = -7;
+            } else if (emotion_ == "angry") {
+                mouth_w = 48;
+                mouth_h = 5;
+                corner_y_offset = 6;
+            } else if (emotion_ == "sad" || emotion_ == "crying") {
+                mouth_w = 38;
+                mouth_h = 4;
+                corner_y_offset = 6;
+            } else if (emotion_ == "shocked" || emotion_ == "surprised") {
+                mouth_w = 20;
+                mouth_h = 22;
+            } else if (emotion_ == "thinking") {
+                mouth_w = 32;
+                mouth_h = 4;
+                corner_y_offset = (frame_count_ % 30 < 15) ? -2 : 2;
+            } else if (emotion_ == "loving" || emotion_ == "shy") {
+                mouth_w = 42;
+                mouth_h = 5;
+                corner_y_offset = -4;
+            }
 
-            // Dynamic smiling / frowning corners (hidden in shocked "O" shape)
-            if (emotion_ == "shocked" || emotion_ == "surprised") {
-                lv_obj_set_style_bg_opa(mouth_corner_l_, LV_OPA_0, 0);
-                lv_obj_set_style_bg_opa(mouth_corner_r_, LV_OPA_0, 0);
-            } else {
-                lv_obj_set_style_bg_opa(mouth_corner_l_, LV_OPA_COVER, 0);
-                lv_obj_set_style_bg_opa(mouth_corner_r_, LV_OPA_COVER, 0);
-                lv_obj_set_pos(mouth_corner_l_, mx - 6, MOUTH_Y + corner_y_offset - 2);
-                lv_obj_set_pos(mouth_corner_r_, mx + mouth_w - 2, MOUTH_Y + corner_y_offset - 2);
+            if (mouth_ && mouth_corner_l_ && mouth_corner_r_) {
+                int mx = 120 - mouth_w / 2;
+                int my = MOUTH_Y - mouth_h / 2;
+
+                lv_obj_set_pos(mouth_, mx, my);
+                lv_obj_set_size(mouth_, mouth_w, mouth_h);
+                lv_obj_set_style_radius(mouth_, mouth_h / 2, 0);
+
+                if (emotion_ == "shocked" || emotion_ == "surprised") {
+                    lv_obj_set_style_bg_opa(mouth_corner_l_, LV_OPA_0, 0);
+                    lv_obj_set_style_bg_opa(mouth_corner_r_, LV_OPA_0, 0);
+                } else {
+                    lv_obj_set_style_bg_opa(mouth_corner_l_, LV_OPA_COVER, 0);
+                    lv_obj_set_style_bg_opa(mouth_corner_r_, LV_OPA_COVER, 0);
+                    lv_obj_set_pos(mouth_corner_l_, mx - 6, MOUTH_Y + corner_y_offset - 2);
+                    lv_obj_set_pos(mouth_corner_r_, mx + mouth_w - 2, MOUTH_Y + corner_y_offset - 2);
+                }
             }
         }
     }
@@ -641,6 +801,20 @@ public:
         }
 
         lv_color_t col = lv_color_hex(color_);
+
+        // Update Ears & Whiskers Color
+        if (ear_l_ && ear_r_) {
+            lv_obj_set_style_bg_color(ear_l_, col, 0);
+            lv_obj_set_style_bg_color(ear_r_, col, 0);
+        }
+        if (whisker_l1_ && whisker_l2_ && whisker_r1_ && whisker_r2_) {
+            lv_obj_set_style_bg_color(whisker_l1_, col, 0);
+            lv_obj_set_style_bg_color(whisker_l2_, col, 0);
+            lv_obj_set_style_bg_color(whisker_r1_, col, 0);
+            lv_obj_set_style_bg_color(whisker_r2_, col, 0);
+        }
+
+        // Update Eyes & Glow
         if (left_eye_ && right_eye_) {
             lv_obj_set_style_bg_color(left_eye_, col, 0);
             lv_obj_set_style_bg_color(right_eye_, col, 0);
@@ -648,11 +822,15 @@ public:
             lv_obj_set_style_shadow_color(right_eye_, col, 0);
         }
 
+        // Update Mouth & Wave Bars
         if (mouth_ && mouth_corner_l_ && mouth_corner_r_) {
             lv_obj_set_style_bg_color(mouth_, col, 0);
             lv_obj_set_style_bg_color(mouth_corner_l_, col, 0);
             lv_obj_set_style_bg_color(mouth_corner_r_, col, 0);
             lv_obj_set_style_shadow_color(mouth_, col, 0);
+        }
+        for (int i = 0; i < 5; ++i) {
+            if (wave_bar_[i]) lv_obj_set_style_bg_color(wave_bar_[i], col, 0);
         }
         return true;
     }
@@ -771,6 +949,10 @@ private:
                 EnterWifiConfigMode();
                 return;
             }
+            // Pet interaction on Boot button tap!
+            if (display_ && app.GetDeviceState() == kDeviceStateIdle) {
+                static_cast<RobotEyesDisplay*>(display_)->TriggerPetReaction();
+            }
             app.ToggleChatState();
         });
     }
@@ -788,6 +970,12 @@ public:
         if (DISPLAY_BACKLIGHT_PIN != GPIO_NUM_NC) {
             GetBacklight()->RestoreBrightness();
         }
+    }
+
+    // Keep Wi-Fi radio in continuous high-performance receive mode
+    // to prevent packet loss and dropped words during audio playback
+    virtual void SetPowerSaveLevel(PowerSaveLevel level) override {
+        esp_wifi_set_ps(WIFI_PS_MIN_MODEM);
     }
 
     virtual Led* GetLed() override {
