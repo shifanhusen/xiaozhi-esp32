@@ -100,6 +100,16 @@ private:
     // Subtitle label
     lv_obj_t* status_label_ = nullptr;
 
+    // Game Symbol Label (for Rock-Paper-Scissors & mini-games)
+    lv_obj_t* game_symbol_label_ = nullptr;
+    int game_symbol_frames_ = 0;
+
+    // Pomodoro Focus Timer state
+    bool pomodoro_active_ = false;
+    int pomodoro_seconds_remaining_ = 0;
+    int pomodoro_total_seconds_ = 0;
+    int pomodoro_celebrate_frames_ = 0;
+
     // 30 FPS animation timer
     lv_timer_t* anim_timer_ = nullptr;
 
@@ -149,6 +159,39 @@ public:
     void TriggerPetReaction() {
         DisplayLockGuard lock(this);
         pet_reaction_frames_ = 45; // ~1.5s playful interaction
+    }
+
+    void StartPomodoro(int minutes = 25) {
+        DisplayLockGuard lock(this);
+        if (minutes <= 0) minutes = 25;
+        pomodoro_active_ = true;
+        pomodoro_seconds_remaining_ = minutes * 60;
+        pomodoro_total_seconds_ = pomodoro_seconds_remaining_;
+        pomodoro_celebrate_frames_ = 0;
+    }
+
+    void StopPomodoro() {
+        DisplayLockGuard lock(this);
+        pomodoro_active_ = false;
+        pomodoro_seconds_remaining_ = 0;
+        pomodoro_celebrate_frames_ = 0;
+        if (status_label_) lv_label_set_text(status_label_, "");
+    }
+
+    void ShowHand(const std::string& hand) {
+        DisplayLockGuard lock(this);
+        game_symbol_frames_ = 90; // Display for 3 seconds
+        if (game_symbol_label_) {
+            if (hand == "rock") {
+                lv_label_set_text(game_symbol_label_, "[ ROCK ]");
+            } else if (hand == "paper") {
+                lv_label_set_text(game_symbol_label_, "[ PAPER ]");
+            } else if (hand == "scissors") {
+                lv_label_set_text(game_symbol_label_, "[ SCISSORS ]");
+            } else {
+                lv_label_set_text(game_symbol_label_, hand.c_str());
+            }
+        }
     }
 
     virtual void SetupUI() override {
@@ -425,7 +468,15 @@ public:
         lv_obj_set_style_text_color(status_label_, lv_color_hex(0x888888), 0);
         lv_label_set_text(status_label_, "");
 
-        // --- 11. 30 FPS Animation Timer (33ms) ---
+        // --- 11. Game & Gesture Overlay Label (Centered across mouth area) ---
+        game_symbol_label_ = lv_label_create(screen);
+        lv_obj_set_width(game_symbol_label_, 180);
+        lv_obj_set_pos(game_symbol_label_, 30, MOUTH_Y - 8);
+        lv_obj_set_style_text_align(game_symbol_label_, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_style_text_color(game_symbol_label_, lv_color_hex(0xFFD600), 0);
+        lv_label_set_text(game_symbol_label_, "");
+
+        // --- 12. 30 FPS Animation Timer (33ms) ---
         anim_timer_ = lv_timer_create([](lv_timer_t* t) {
             auto self = static_cast<RobotEyesDisplay*>(lv_timer_get_user_data(t));
             if (self) self->UpdateAnimation();
@@ -546,6 +597,34 @@ public:
         }
 
         // --- 4. Mood-Specific Morphing, Rotation, & Dynamic Shapes ---
+        // --- Pomodoro Focus Timer Countdown ---
+        if (pomodoro_active_ && pomodoro_seconds_remaining_ > 0) {
+            if (frame_count_ % 30 == 0) { // Every 1 second
+                pomodoro_seconds_remaining_--;
+                if (status_label_) {
+                    int m = pomodoro_seconds_remaining_ / 60;
+                    int s = pomodoro_seconds_remaining_ % 60;
+                    char time_buf[32];
+                    snprintf(time_buf, sizeof(time_buf), "Focus %02d:%02d", m, s);
+                    lv_label_set_text(status_label_, time_buf);
+                }
+                if (pomodoro_seconds_remaining_ == 0) {
+                    pomodoro_active_ = false;
+                    pomodoro_celebrate_frames_ = 120; // 4 seconds celebration!
+                    if (status_label_) {
+                        lv_label_set_text(status_label_, "Time's up! Break time!");
+                    }
+                }
+            }
+        }
+
+        // Game Symbol overlay visibility timer
+        if (game_symbol_frames_ > 0) {
+            game_symbol_frames_--;
+        } else if (game_symbol_label_) {
+            lv_label_set_text(game_symbol_label_, "");
+        }
+
         int eye_w = EYE_WIDTH + blink_squash_w;
         int eye_h = EYE_HEIGHT;
         int left_y_offset = 0;
@@ -556,7 +635,15 @@ public:
         int bounce_y = 0;
         lv_opa_t blush_opa = LV_OPA_0;
 
-        if (pet_reaction_frames_ > 0) {
+        if (pomodoro_celebrate_frames_ > 0) {
+            pomodoro_celebrate_frames_--;
+            bottom_lid_h = 44;
+            blush_opa = LV_OPA_90;
+            bounce_y = (frame_count_ % 8 < 4) ? -2 : 2; // Joyful victory celebration bounce!
+        } else if (pomodoro_active_) {
+            // Determined focused work gaze
+            top_lid_h = (top_lid_h > 24) ? top_lid_h : 22;
+        } else if (pet_reaction_frames_ > 0) {
             // Interactive pet reaction: joyful wink & blush!
             bottom_lid_h = 44;
             top_lid_h = (top_lid_h > 12) ? top_lid_h : 10;
@@ -958,7 +1045,48 @@ private:
     }
 
     void InitializeTools() {
-        static LampController lamp(LAMP_GPIO);
+        if (LAMP_GPIO != GPIO_NUM_NC) {
+            static LampController lamp(LAMP_GPIO);
+        }
+
+        auto& mcp = McpServer::GetInstance();
+
+        // 1. Pomodoro Focus Timer Tools
+        mcp.AddTool("self.timer.start_pomodoro", "Start a 25-minute Pomodoro focus timer or countdown session for work or study", PropertyList(), [this](const PropertyList& p) -> ReturnValue {
+            if (display_) {
+                static_cast<RobotEyesDisplay*>(display_)->StartPomodoro(25);
+            }
+            return true;
+        });
+
+        mcp.AddTool("self.timer.stop_pomodoro", "Stop or cancel the active Pomodoro focus timer", PropertyList(), [this](const PropertyList& p) -> ReturnValue {
+            if (display_) {
+                static_cast<RobotEyesDisplay*>(display_)->StopPomodoro();
+            }
+            return true;
+        });
+
+        // 2. Interactive Mini-Games: Rock-Paper-Scissors Tools
+        mcp.AddTool("self.game.rock", "Display the Rock hand gesture on screen during a game of Rock-Paper-Scissors", PropertyList(), [this](const PropertyList& p) -> ReturnValue {
+            if (display_) {
+                static_cast<RobotEyesDisplay*>(display_)->ShowHand("rock");
+            }
+            return true;
+        });
+
+        mcp.AddTool("self.game.paper", "Display the Paper hand gesture on screen during a game of Rock-Paper-Scissors", PropertyList(), [this](const PropertyList& p) -> ReturnValue {
+            if (display_) {
+                static_cast<RobotEyesDisplay*>(display_)->ShowHand("paper");
+            }
+            return true;
+        });
+
+        mcp.AddTool("self.game.scissors", "Display the Scissors hand gesture on screen during a game of Rock-Paper-Scissors", PropertyList(), [this](const PropertyList& p) -> ReturnValue {
+            if (display_) {
+                static_cast<RobotEyesDisplay*>(display_)->ShowHand("scissors");
+            }
+            return true;
+        });
     }
 
 public:
