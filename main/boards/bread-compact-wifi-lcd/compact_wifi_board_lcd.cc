@@ -89,8 +89,9 @@ private:
     // Tear drop object for sad/crying expressions
     lv_obj_t* tear_ = nullptr;
 
-    // Morphing mouth objects (center aperture + dynamic smiling/frowning corners)
+    // Morphing mouth objects (center aperture + inner tongue/glow + dynamic corners)
     lv_obj_t* mouth_ = nullptr;
+    lv_obj_t* mouth_inner_ = nullptr;
     lv_obj_t* mouth_corner_l_ = nullptr;
     lv_obj_t* mouth_corner_r_ = nullptr;
 
@@ -115,7 +116,8 @@ private:
 
     // Mood & styling state
     std::string emotion_ = "neutral";
-    uint32_t color_ = 0x00E5FF; // High-Tech Neon Cyan
+    uint32_t color_ = 0x00E5FF;        // Desired mood color
+    uint32_t active_color_ = 0x00E5FF; // Currently applied hardware color
 
     // Animation physics state
     int frame_count_ = 0;
@@ -416,7 +418,7 @@ public:
         lv_obj_set_style_border_width(tear_, 0, 0);
         lv_obj_set_scrollbar_mode(tear_, LV_SCROLLBAR_MODE_OFF);
 
-        // --- 8. Morphing Animated Mouth ---
+        // --- 8. Morphing Animated Mouth + Coral-Pink Inner Tongue Accent ---
         mouth_ = lv_obj_create(screen);
         lv_obj_set_size(mouth_, 44, 6);
         lv_obj_set_pos(mouth_, 98, MOUTH_Y);
@@ -428,6 +430,15 @@ public:
         lv_obj_set_style_shadow_color(mouth_, col, 0);
         lv_obj_set_style_shadow_opa(mouth_, LV_OPA_50, 0);
         lv_obj_set_scrollbar_mode(mouth_, LV_SCROLLBAR_MODE_OFF);
+
+        mouth_inner_ = lv_obj_create(screen);
+        lv_obj_set_size(mouth_inner_, 20, 6);
+        lv_obj_set_pos(mouth_inner_, 110, MOUTH_Y + 2);
+        lv_obj_set_style_radius(mouth_inner_, 3, 0);
+        lv_obj_set_style_bg_color(mouth_inner_, lv_color_hex(0xFF4081), 0);
+        lv_obj_set_style_bg_opa(mouth_inner_, LV_OPA_0, 0);
+        lv_obj_set_style_border_width(mouth_inner_, 0, 0);
+        lv_obj_set_scrollbar_mode(mouth_inner_, LV_SCROLLBAR_MODE_OFF);
 
         mouth_corner_l_ = lv_obj_create(screen);
         lv_obj_set_size(mouth_corner_l_, 8, 6);
@@ -473,7 +484,7 @@ public:
         lv_obj_set_width(game_symbol_label_, 180);
         lv_obj_set_pos(game_symbol_label_, 30, MOUTH_Y - 8);
         lv_obj_set_style_text_align(game_symbol_label_, LV_TEXT_ALIGN_CENTER, 0);
-        lv_obj_set_style_text_color(game_symbol_label_, lv_color_hex(0xFFD600), 0);
+        lv_obj_set_style_text_color(game_symbol_label_, lv_color_hex(0x00E5FF), 0);
         lv_label_set_text(game_symbol_label_, "");
 
         // --- 12. 30 FPS Animation Timer (33ms) ---
@@ -485,8 +496,49 @@ public:
         setup_ui_called_ = true;
     }
 
+    void ApplyColor(uint32_t hex_color) {
+        if (active_color_ == hex_color) return;
+        active_color_ = hex_color;
+        lv_color_t col = lv_color_hex(hex_color);
+
+        if (ear_l_ && ear_r_) {
+            lv_obj_set_style_bg_color(ear_l_, col, 0);
+            lv_obj_set_style_bg_color(ear_r_, col, 0);
+        }
+        if (whisker_l1_ && whisker_l2_ && whisker_r1_ && whisker_r2_) {
+            lv_obj_set_style_bg_color(whisker_l1_, col, 0);
+            lv_obj_set_style_bg_color(whisker_l2_, col, 0);
+            lv_obj_set_style_bg_color(whisker_r1_, col, 0);
+            lv_obj_set_style_bg_color(whisker_r2_, col, 0);
+        }
+        if (left_eye_ && right_eye_) {
+            lv_obj_set_style_bg_color(left_eye_, col, 0);
+            lv_obj_set_style_bg_color(right_eye_, col, 0);
+            lv_obj_set_style_shadow_color(left_eye_, col, 0);
+            lv_obj_set_style_shadow_color(right_eye_, col, 0);
+        }
+        if (mouth_ && mouth_corner_l_ && mouth_corner_r_) {
+            lv_obj_set_style_bg_color(mouth_, col, 0);
+            lv_obj_set_style_bg_color(mouth_corner_l_, col, 0);
+            lv_obj_set_style_bg_color(mouth_corner_r_, col, 0);
+            lv_obj_set_style_shadow_color(mouth_, col, 0);
+        }
+        for (int i = 0; i < 5; ++i) {
+            if (wave_bar_[i]) lv_obj_set_style_bg_color(wave_bar_[i], col, 0);
+        }
+    }
+
     void UpdateAnimation() {
         frame_count_++;
+
+        // Real-time hardware state detection (Decouples Speaking/Listening from Emotion!)
+        auto dev_state = Application::GetInstance().GetDeviceState();
+        bool is_listening = (dev_state == kDeviceStateListening) || (emotion_ == "listening");
+        bool is_speaking = (dev_state == kDeviceStateSpeaking) || (emotion_ == "speaking");
+
+        // Sync active color smoothly (Listening uses Neon Mint-Aqua; otherwise mood color)
+        uint32_t target_color = is_listening ? 0x00FFAA : color_;
+        ApplyColor(target_color);
 
         // Pet reaction active timer
         if (pet_reaction_frames_ > 0) {
@@ -497,7 +549,19 @@ public:
         if (frame_count_ >= next_saccade_frame_) {
             next_saccade_frame_ = frame_count_ + 75 + (frame_count_ % 65);
             int rnd = (frame_count_ / 17) % 6;
-            if (rnd == 0) {
+            if (is_speaking || is_listening) {
+                // Keep attentive eye contact with small natural micro-glances when talking/listening
+                if (rnd == 0) {
+                    saccade_target_x_ = -4;
+                    saccade_target_y_ = 0;
+                } else if (rnd == 1) {
+                    saccade_target_x_ = 4;
+                    saccade_target_y_ = 0;
+                } else {
+                    saccade_target_x_ = 0;
+                    saccade_target_y_ = 0;
+                }
+            } else if (rnd == 0) {
                 saccade_target_x_ = -12; // Look curious left
                 saccade_target_y_ = 0;
             } else if (rnd == 1) {
@@ -529,27 +593,27 @@ public:
             if (frame_count_ % blink_interval_ == 0) {
                 blink_stage_ = 1;
                 double_blink_counter_++;
-                blink_interval_ = 95 + (frame_count_ % 45); // Randomized natural timing
+                blink_interval_ = 95 + (frame_count_ % 45);
             }
         }
 
-        int top_lid_h = 0;
+        int blink_lid_h = 0;
         int blink_squash_w = 0;
 
         if (blink_stage_ == 1) { // Closing fast
-            top_lid_h = EYE_HEIGHT * 6 / 10;
+            blink_lid_h = EYE_HEIGHT * 6 / 10;
             blink_squash_w = 2;
             blink_stage_ = 2;
         } else if (blink_stage_ == 2) { // Fully closed
-            top_lid_h = EYE_HEIGHT + 4;
+            blink_lid_h = EYE_HEIGHT + 4;
             blink_squash_w = 4;
             blink_stage_ = 3;
         } else if (blink_stage_ == 3) { // Opening with elastic overshoot
-            top_lid_h = EYE_HEIGHT * 3 / 10;
+            blink_lid_h = EYE_HEIGHT * 3 / 10;
             blink_squash_w = 1;
             blink_stage_ = 4;
         } else if (blink_stage_ == 4) { // Reopened
-            top_lid_h = 0;
+            blink_lid_h = 0;
             blink_squash_w = 0;
             if ((double_blink_counter_ % 3 == 0) && (double_blink_counter_ % 6 != 0)) {
                 blink_stage_ = 1; // Playful double-blink flutter
@@ -565,27 +629,48 @@ public:
         int ear_y = 20 + breath_y;
 
         if (pet_reaction_frames_ > 0) {
-            // Pet reaction: happy rapid ear flutter!
             int flick = (frame_count_ % 6 < 3) ? 50 : -30;
             ear_rot_l = -220 + flick;
             ear_rot_r = 220 - flick;
             ear_y = 18;
-        } else if (emotion_ == "listening") {
-            // Ears perk straight up attentively!
+        } else if (is_listening) {
+            // Ears perk straight up attentively when listening!
             ear_rot_l = -100;
             ear_rot_r = 100;
             ear_y = 18;
         } else if (emotion_ == "sleepy" || emotion_ == "tired") {
-            // Ears droop downward sleepily
             ear_rot_l = -340;
             ear_rot_r = 340;
             ear_y = 24;
-        } else if (emotion_ == "happy" || emotion_ == "laughing" || emotion_ == "funny") {
-            ear_rot_l = -180;
-            ear_rot_r = 180;
-            ear_y = (frame_count_ % 10 < 5) ? 18 : 20;
+        } else if (emotion_ == "sad" || emotion_ == "crying" || emotion_ == "embarrassed" || emotion_ == "shy") {
+            ear_rot_l = -310;
+            ear_rot_r = 310;
+            ear_y = 23;
+        } else if (emotion_ == "angry") {
+            ear_rot_l = -290;
+            ear_rot_r = 290;
+            ear_y = 22;
+        } else if (emotion_ == "confused") {
+            // Asymmetric ear tilt for confused!
+            ear_rot_l = -130;
+            ear_rot_r = 290;
+        } else if (emotion_ == "winking") {
+            ear_rot_l = -170;
+            ear_rot_r = 270;
+        } else if (emotion_ == "surprised" || emotion_ == "shocked") {
+            ear_rot_l = -80;
+            ear_rot_r = 80;
+            ear_y = 17;
+        } else if (emotion_ == "happy" || emotion_ == "laughing" || emotion_ == "funny" || emotion_ == "silly" || emotion_ == "delicious") {
+            ear_rot_l = -170;
+            ear_rot_r = 170;
+            ear_y = (frame_count_ % 12 < 6) ? 18 : 20;
+        } else if (is_speaking) {
+            // Subtle lively ear rhythm while speaking
+            int nod = (frame_count_ % 16 < 8) ? -15 : 10;
+            ear_rot_l = -200 + nod;
+            ear_rot_r = 200 - nod;
         } else if (blink_stage_ > 0 && double_blink_counter_ % 2 == 0) {
-            // Cute ear twitch during double blinks
             ear_rot_l = -160;
         }
 
@@ -596,10 +681,9 @@ public:
             lv_obj_set_style_transform_rotation(ear_r_, ear_rot_r, 0);
         }
 
-        // --- 4. Mood-Specific Morphing, Rotation, & Dynamic Shapes ---
-        // --- Pomodoro Focus Timer Countdown ---
+        // --- 4. Pomodoro Focus Timer Countdown & Game Overlays ---
         if (pomodoro_active_ && pomodoro_seconds_remaining_ > 0) {
-            if (frame_count_ % 30 == 0) { // Every 1 second
+            if (frame_count_ % 30 == 0) {
                 pomodoro_seconds_remaining_--;
                 if (status_label_) {
                     int m = pomodoro_seconds_remaining_ / 60;
@@ -610,7 +694,7 @@ public:
                 }
                 if (pomodoro_seconds_remaining_ == 0) {
                     pomodoro_active_ = false;
-                    pomodoro_celebrate_frames_ = 120; // 4 seconds celebration!
+                    pomodoro_celebrate_frames_ = 120;
                     if (status_label_) {
                         lv_label_set_text(status_label_, "Time's up! Break time!");
                     }
@@ -618,18 +702,23 @@ public:
             }
         }
 
-        // Game Symbol overlay visibility timer
         if (game_symbol_frames_ > 0) {
             game_symbol_frames_--;
         } else if (game_symbol_label_) {
             lv_label_set_text(game_symbol_label_, "");
         }
 
-        int eye_w = EYE_WIDTH + blink_squash_w;
-        int eye_h = EYE_HEIGHT;
+        // --- 5. Per-Eye Mood Morphing, Asymmetric Brows & Expressions ---
+        int left_eye_w = EYE_WIDTH + blink_squash_w;
+        int right_eye_w = EYE_WIDTH + blink_squash_w;
+        int left_eye_h = EYE_HEIGHT;
+        int right_eye_h = EYE_HEIGHT;
         int left_y_offset = 0;
         int right_y_offset = 0;
-        int bottom_lid_h = 0;
+        int left_top_lid_h = blink_lid_h;
+        int right_top_lid_h = blink_lid_h;
+        int left_bottom_lid_h = 0;
+        int right_bottom_lid_h = 0;
         int top_lid_rot_l = 0; // In 0.1 degrees
         int top_lid_rot_r = 0;
         int bounce_y = 0;
@@ -637,50 +726,91 @@ public:
 
         if (pomodoro_celebrate_frames_ > 0) {
             pomodoro_celebrate_frames_--;
-            bottom_lid_h = 44;
+            left_bottom_lid_h = 44;
+            right_bottom_lid_h = 44;
             blush_opa = LV_OPA_90;
-            bounce_y = (frame_count_ % 8 < 4) ? -2 : 2; // Joyful victory celebration bounce!
+            bounce_y = (frame_count_ % 8 < 4) ? -2 : 2;
         } else if (pomodoro_active_) {
-            // Determined focused work gaze
-            top_lid_h = (top_lid_h > 24) ? top_lid_h : 22;
+            left_top_lid_h = std::max(blink_lid_h, 20);
+            right_top_lid_h = std::max(blink_lid_h, 20);
+            top_lid_rot_l = 50;
+            top_lid_rot_r = -50;
         } else if (pet_reaction_frames_ > 0) {
-            // Interactive pet reaction: joyful wink & blush!
-            bottom_lid_h = 44;
-            top_lid_h = (top_lid_h > 12) ? top_lid_h : 10;
+            left_bottom_lid_h = 44;
+            right_bottom_lid_h = 44;
+            left_top_lid_h = std::max(blink_lid_h, 10);
+            right_top_lid_h = std::max(blink_lid_h, 10);
             blush_opa = LV_OPA_90;
             bounce_y = (frame_count_ % 8 < 4) ? -2 : 0;
-        } else if (emotion_ == "happy") {
-            bottom_lid_h = 44;
-            top_lid_h = (top_lid_h > 12) ? top_lid_h : 10;
+        } else if (emotion_ == "happy" || emotion_ == "delicious") {
+            left_bottom_lid_h = 42;
+            right_bottom_lid_h = 42;
+            left_top_lid_h = std::max(blink_lid_h, 8);
+            right_top_lid_h = std::max(blink_lid_h, 8);
             blush_opa = LV_OPA_70;
             bounce_y = (frame_count_ % 30 < 15) ? -1 : 0;
         } else if (emotion_ == "laughing" || emotion_ == "funny") {
-            bottom_lid_h = 48;
-            top_lid_h = (top_lid_h > 20) ? top_lid_h : 18;
-            blush_opa = LV_OPA_80;
+            left_bottom_lid_h = 48;
+            right_bottom_lid_h = 48;
+            left_top_lid_h = std::max(blink_lid_h, 16);
+            right_top_lid_h = std::max(blink_lid_h, 16);
+            blush_opa = LV_OPA_90;
             bounce_y = (frame_count_ % 6 < 3) ? -2 : 2;
-        } else if (emotion_ == "angry") {
-            top_lid_rot_l = 140;
-            top_lid_rot_r = -140;
-            top_lid_h = (top_lid_h > 36) ? top_lid_h : 36;
-            eye_w = EYE_WIDTH - 2;
+        } else if (emotion_ == "winking") {
+            // Left eye open & bright, Right eye winking shut!
+            left_bottom_lid_h = 14;
+            right_top_lid_h = 42;
+            right_bottom_lid_h = 42;
+            right_y_offset = 2;
+            blush_opa = LV_OPA_80;
+        } else if (emotion_ == "cool" || emotion_ == "confident" || emotion_ == "relaxed" || emotion_ == "chill") {
+            // Half-lidded confident shades look with slight brow tilt
+            left_top_lid_h = std::max(blink_lid_h, 26);
+            right_top_lid_h = std::max(blink_lid_h, 24);
+            left_bottom_lid_h = 10;
+            right_bottom_lid_h = 10;
+            top_lid_rot_l = 40;
+            top_lid_rot_r = -40;
+        } else if (emotion_ == "confused") {
+            // Asymmetric Pixar/Cozmo confused squint (left squinted, right wide)
+            left_top_lid_h = std::max(blink_lid_h, 34);
+            left_bottom_lid_h = 14;
+            right_eye_h = EYE_HEIGHT + 6;
+            left_y_offset = 3;
+            right_y_offset = -4;
+            top_lid_rot_l = -90;
+            top_lid_rot_r = -70;
         } else if (emotion_ == "thinking") {
-            left_y_offset = -7;
-            right_y_offset = 3;
-            top_lid_rot_l = -100;
-            top_lid_h = (top_lid_h > 16) ? top_lid_h : 16;
-            saccade_cur_x_ = -10;
+            // Pondering upward gaze with asymmetric cocked eyebrow
+            left_y_offset = -5;
+            right_y_offset = 2;
+            left_top_lid_h = std::max(blink_lid_h, 10);
+            right_top_lid_h = std::max(blink_lid_h, 26);
+            right_bottom_lid_h = 12;
+            top_lid_rot_l = -80;
+            top_lid_rot_r = 60;
+            saccade_cur_x_ = -9;
             saccade_cur_y_ = -5;
+        } else if (emotion_ == "angry") {
+            top_lid_rot_l = 150;
+            top_lid_rot_r = -150;
+            left_top_lid_h = std::max(blink_lid_h, 36);
+            right_top_lid_h = std::max(blink_lid_h, 36);
+            left_eye_w = EYE_WIDTH - 2;
+            right_eye_w = EYE_WIDTH - 2;
         } else if (emotion_ == "shocked" || emotion_ == "surprised") {
-            eye_w = EYE_WIDTH + 6;
-            eye_h = EYE_HEIGHT + 8;
-            top_lid_h = 0;
-            bottom_lid_h = 0;
+            left_eye_w = EYE_WIDTH + 6;
+            right_eye_w = EYE_WIDTH + 6;
+            left_eye_h = EYE_HEIGHT + 8;
+            right_eye_h = EYE_HEIGHT + 8;
+            left_top_lid_h = 0;
+            right_top_lid_h = 0;
             bounce_y = (frame_count_ % 4 < 2) ? -1 : 1;
         } else if (emotion_ == "sad" || emotion_ == "crying") {
-            top_lid_rot_l = -120;
-            top_lid_rot_r = 120;
-            top_lid_h = (top_lid_h > 30) ? top_lid_h : 30;
+            top_lid_rot_l = -130;
+            top_lid_rot_r = 130;
+            left_top_lid_h = std::max(blink_lid_h, 30);
+            right_top_lid_h = std::max(blink_lid_h, 30);
             left_y_offset = 3;
             right_y_offset = 3;
             if (emotion_ == "crying" && tear_) {
@@ -689,15 +819,40 @@ public:
                 lv_obj_set_style_bg_opa(tear_, (tear_y_ > 38) ? LV_OPA_30 : LV_OPA_80, 0);
             }
         } else if (emotion_ == "sleepy" || emotion_ == "tired") {
-            top_lid_h = (top_lid_h > 58) ? top_lid_h : 58;
+            left_top_lid_h = std::max(blink_lid_h, 56);
+            right_top_lid_h = std::max(blink_lid_h, 56);
             breath_y = (frame_count_ % 90 < 45) ? 0 : 2;
-        } else if (emotion_ == "loving" || emotion_ == "heart" || emotion_ == "shy") {
-            blush_opa = LV_OPA_80;
-            bottom_lid_h = 32;
-            top_lid_h = (top_lid_h > 10) ? top_lid_h : 8;
-        } else if (emotion_ == "listening") {
-            eye_h = EYE_HEIGHT + 3;
-            top_lid_h = (top_lid_h > 0) ? top_lid_h : 0;
+        } else if (emotion_ == "embarrassed" || emotion_ == "shy") {
+            top_lid_rot_l = -90;
+            top_lid_rot_r = 90;
+            left_top_lid_h = std::max(blink_lid_h, 22);
+            right_top_lid_h = std::max(blink_lid_h, 22);
+            left_bottom_lid_h = 22;
+            right_bottom_lid_h = 22;
+            saccade_cur_x_ = -8;
+            saccade_cur_y_ = 4;
+            blush_opa = LV_OPA_90;
+        } else if (emotion_ == "loving" || emotion_ == "heart" || emotion_ == "kissy") {
+            blush_opa = LV_OPA_90;
+            left_bottom_lid_h = 36;
+            right_bottom_lid_h = 36;
+            left_top_lid_h = std::max(blink_lid_h, 8);
+            right_top_lid_h = std::max(blink_lid_h, 8);
+        } else if (emotion_ == "silly") {
+            // Playful derpy asymmetric eyes + blush
+            left_bottom_lid_h = 32;
+            right_top_lid_h = std::max(blink_lid_h, 24);
+            left_y_offset = -3;
+            right_y_offset = 3;
+            blush_opa = LV_OPA_70;
+        } else if (is_listening) {
+            left_eye_h = EYE_HEIGHT + 4;
+            right_eye_h = EYE_HEIGHT + 4;
+        } else if (is_speaking) {
+            // Friendly, engaged eyes while speaking (subtle warm lower curve + soft cheek glow)
+            left_bottom_lid_h = 14;
+            right_bottom_lid_h = 14;
+            blush_opa = LV_OPA_30;
         }
 
         if (emotion_ != "crying" && tear_) {
@@ -711,13 +866,13 @@ public:
             lv_obj_set_style_bg_opa(blush_r_, blush_opa, 0);
         }
 
-        // --- 5. Render Left Eye & Dynamic Sculptors ---
+        // --- 6. Render Left Eye & Dynamic Sculptors ---
         if (left_eye_ && left_top_lid_ && left_bottom_lid_) {
-            int cur_lx = LEFT_EYE_X + saccade_cur_x_ - (eye_w - EYE_WIDTH) / 2;
+            int cur_lx = LEFT_EYE_X + saccade_cur_x_ - (left_eye_w - EYE_WIDTH) / 2;
             int cur_ly = EYE_Y + breath_y + bounce_y + left_y_offset;
 
             lv_obj_set_pos(left_eye_, cur_lx, cur_ly);
-            lv_obj_set_size(left_eye_, eye_w, eye_h);
+            lv_obj_set_size(left_eye_, left_eye_w, left_eye_h);
 
             if (left_glare1_) {
                 int g1_x = 8 + (saccade_cur_x_ * 3) / 10;
@@ -731,20 +886,20 @@ public:
             }
 
             lv_obj_set_pos(left_top_lid_, cur_lx - 7, cur_ly - 6);
-            lv_obj_set_size(left_top_lid_, eye_w + 14, top_lid_h);
+            lv_obj_set_size(left_top_lid_, left_eye_w + 14, left_top_lid_h);
             lv_obj_set_style_transform_rotation(left_top_lid_, top_lid_rot_l, 0);
 
-            lv_obj_set_pos(left_bottom_lid_, cur_lx - 8, cur_ly + eye_h - bottom_lid_h);
-            lv_obj_set_size(left_bottom_lid_, eye_w + 16, bottom_lid_h + 6);
+            lv_obj_set_pos(left_bottom_lid_, cur_lx - 8, cur_ly + left_eye_h - left_bottom_lid_h);
+            lv_obj_set_size(left_bottom_lid_, left_eye_w + 16, left_bottom_lid_h + 6);
         }
 
-        // --- 6. Render Right Eye & Dynamic Sculptors ---
+        // --- 7. Render Right Eye & Dynamic Sculptors ---
         if (right_eye_ && right_top_lid_ && right_bottom_lid_) {
-            int cur_rx = RIGHT_EYE_X + saccade_cur_x_ - (eye_w - EYE_WIDTH) / 2;
+            int cur_rx = RIGHT_EYE_X + saccade_cur_x_ - (right_eye_w - EYE_WIDTH) / 2;
             int cur_ry = EYE_Y + breath_y + bounce_y + right_y_offset;
 
             lv_obj_set_pos(right_eye_, cur_rx, cur_ry);
-            lv_obj_set_size(right_eye_, eye_w, eye_h);
+            lv_obj_set_size(right_eye_, right_eye_w, right_eye_h);
 
             if (right_glare1_) {
                 int g1_x = 8 + (saccade_cur_x_ * 3) / 10;
@@ -758,21 +913,22 @@ public:
             }
 
             lv_obj_set_pos(right_top_lid_, cur_rx - 7, cur_ry - 6);
-            lv_obj_set_size(right_top_lid_, eye_w + 14, top_lid_h);
+            lv_obj_set_size(right_top_lid_, right_eye_w + 14, right_top_lid_h);
             lv_obj_set_style_transform_rotation(right_top_lid_, top_lid_rot_r, 0);
 
-            lv_obj_set_pos(right_bottom_lid_, cur_rx - 8, cur_ry + eye_h - bottom_lid_h);
-            lv_obj_set_size(right_bottom_lid_, eye_w + 16, bottom_lid_h + 6);
+            lv_obj_set_pos(right_bottom_lid_, cur_rx - 8, cur_ry + right_eye_h - right_bottom_lid_h);
+            lv_obj_set_size(right_bottom_lid_, right_eye_w + 16, right_bottom_lid_h + 6);
         }
 
-        // --- 7. Morphing Mouth & EchoEar Soundwave Visualizer ---
-        int mouth_w = 42;
+        // --- 8. Morphing Mouth, Lip-Sync & EchoEar Soundwave Visualizer ---
+        int mouth_w = 40;
         int mouth_h = 5;
-        int corner_y_offset = 0;
+        int corner_l_y = -2;
+        int corner_r_y = -2;
+        bool hide_corners = false;
+        bool show_tongue_blep = false;
 
-        bool is_listening = (emotion_ == "listening");
-
-        // Toggle Acoustic Soundwave vs Normal Mouth
+        // Toggle Acoustic Soundwave vs Mouth
         for (int i = 0; i < 5; ++i) {
             if (wave_bar_[i]) {
                 if (is_listening) {
@@ -789,52 +945,104 @@ public:
         }
 
         if (is_listening) {
-            // Hide standard mouth during soundwave display
             if (mouth_) lv_obj_set_style_bg_opa(mouth_, LV_OPA_0, 0);
+            if (mouth_inner_) lv_obj_set_style_bg_opa(mouth_inner_, LV_OPA_0, 0);
             if (mouth_corner_l_) lv_obj_set_style_bg_opa(mouth_corner_l_, LV_OPA_0, 0);
             if (mouth_corner_r_) lv_obj_set_style_bg_opa(mouth_corner_r_, LV_OPA_0, 0);
         } else {
             if (mouth_) lv_obj_set_style_bg_opa(mouth_, LV_OPA_COVER, 0);
 
             if (pet_reaction_frames_ > 0) {
-                // Cheerful open smile
-                mouth_w = 54;
-                mouth_h = 10;
-                corner_y_offset = -6;
-            } else if (emotion_ == "speaking") {
-                mouth_phase_ = (mouth_phase_ + 1) % 12;
-                static const int speech_h[12] = {4, 10, 18, 24, 16, 10, 5, 14, 22, 16, 8, 4};
-                static const int speech_w[12] = {40, 46, 52, 56, 48, 44, 42, 48, 54, 48, 42, 40};
+                mouth_w = 52;
+                mouth_h = 14;
+                corner_l_y = -6;
+                corner_r_y = -6;
+            } else if (is_speaking) {
+                // Organic 16-step multi-syllable lip-sync envelope
+                mouth_phase_ = (mouth_phase_ + 1) % 16;
+                static const int speech_h[16] = {5, 11, 18, 22, 14, 7, 13, 20, 16, 6, 12, 19, 15, 9, 14, 6};
+                static const int speech_w[16] = {38, 44, 50, 54, 46, 40, 46, 52, 48, 38, 45, 50, 46, 42, 46, 40};
                 mouth_h = speech_h[mouth_phase_];
                 mouth_w = speech_w[mouth_phase_];
-                corner_y_offset = (mouth_h > 12) ? -2 : 0;
-                if (mouth_h > 16 && left_eye_ && right_eye_) {
-                    lv_obj_set_size(left_eye_, eye_w + 1, eye_h - 1);
-                    lv_obj_set_size(right_eye_, eye_w + 1, eye_h - 1);
+                corner_l_y = -4;
+                corner_r_y = -4;
+                // Subtle vocal energy bounce on strong open syllables
+                if (mouth_h >= 18 && left_eye_ && right_eye_) {
+                    lv_obj_set_size(left_eye_, left_eye_w + 2, left_eye_h - 1);
+                    lv_obj_set_size(right_eye_, right_eye_w + 2, right_eye_h - 1);
                 }
-            } else if (emotion_ == "happy" || emotion_ == "laughing" || emotion_ == "funny") {
+            } else if (emotion_ == "laughing" || emotion_ == "funny") {
                 mouth_w = 54;
-                mouth_h = (emotion_ == "laughing" || emotion_ == "funny") ? 14 : 6;
-                corner_y_offset = -7;
+                mouth_h = (frame_count_ % 8 < 4) ? 18 : 14;
+                corner_l_y = -7;
+                corner_r_y = -7;
+            } else if (emotion_ == "happy") {
+                mouth_w = 50;
+                mouth_h = 10;
+                corner_l_y = -6;
+                corner_r_y = -6;
+            } else if (emotion_ == "winking") {
+                mouth_w = 46;
+                mouth_h = 8;
+                corner_l_y = -2;
+                corner_r_y = -7;
+            } else if (emotion_ == "cool" || emotion_ == "confident") {
+                // Classic one-sided confident smirk
+                mouth_w = 44;
+                mouth_h = 5;
+                corner_l_y = 1;
+                corner_r_y = -6;
+            } else if (emotion_ == "silly" || emotion_ == "delicious") {
+                mouth_w = 46;
+                mouth_h = 8;
+                corner_l_y = -5;
+                corner_r_y = -5;
+                show_tongue_blep = true;
+            } else if (emotion_ == "kissy") {
+                // Cute puckered kissy mouth
+                mouth_w = 14;
+                mouth_h = 14;
+                hide_corners = true;
             } else if (emotion_ == "angry") {
-                mouth_w = 48;
+                mouth_w = 46;
                 mouth_h = 5;
-                corner_y_offset = 6;
+                corner_l_y = 6;
+                corner_r_y = 6;
             } else if (emotion_ == "sad" || emotion_ == "crying") {
-                mouth_w = 38;
+                mouth_w = 36;
                 mouth_h = 4;
-                corner_y_offset = 6;
+                corner_l_y = 6;
+                corner_r_y = 6;
             } else if (emotion_ == "shocked" || emotion_ == "surprised") {
-                mouth_w = 20;
-                mouth_h = 22;
+                mouth_w = 22;
+                mouth_h = 24;
+                hide_corners = true;
             } else if (emotion_ == "thinking") {
-                mouth_w = 32;
-                mouth_h = 4;
-                corner_y_offset = (frame_count_ % 30 < 15) ? -2 : 2;
-            } else if (emotion_ == "loving" || emotion_ == "shy") {
-                mouth_w = 42;
+                mouth_w = 28;
                 mouth_h = 5;
-                corner_y_offset = -4;
+                corner_l_y = -2;
+                corner_r_y = 2;
+            } else if (emotion_ == "confused") {
+                // Crooked wavy mouth
+                mouth_w = 34;
+                mouth_h = 5;
+                corner_l_y = -4;
+                corner_r_y = 4;
+            } else if (emotion_ == "embarrassed" || emotion_ == "shy") {
+                mouth_w = 26;
+                mouth_h = 4;
+                corner_l_y = 2;
+                corner_r_y = 2;
+            } else if (emotion_ == "sleepy" || emotion_ == "tired") {
+                // Slow sleepy breathing mouth / mini-yawn
+                mouth_w = 20;
+                mouth_h = (frame_count_ % 90 < 45) ? 4 : 8;
+                hide_corners = true;
+            } else if (emotion_ == "loving" || emotion_ == "heart") {
+                mouth_w = 44;
+                mouth_h = 8;
+                corner_l_y = -5;
+                corner_r_y = -5;
             }
 
             if (mouth_ && mouth_corner_l_ && mouth_corner_r_) {
@@ -845,14 +1053,33 @@ public:
                 lv_obj_set_size(mouth_, mouth_w, mouth_h);
                 lv_obj_set_style_radius(mouth_, mouth_h / 2, 0);
 
-                if (emotion_ == "shocked" || emotion_ == "surprised") {
+                // Inner coral-pink tongue highlight when mouth opens wide or bleps
+                if (mouth_inner_) {
+                    if (show_tongue_blep) {
+                        lv_obj_set_style_bg_opa(mouth_inner_, LV_OPA_90, 0);
+                        lv_obj_set_size(mouth_inner_, 18, 12);
+                        lv_obj_set_pos(mouth_inner_, 111, my + mouth_h - 3);
+                        lv_obj_set_style_radius(mouth_inner_, 6, 0);
+                    } else if (mouth_h >= 10 && !hide_corners) {
+                        int inner_w = std::max(12, mouth_w / 2);
+                        int inner_h = std::max(4, mouth_h / 2 - 1);
+                        lv_obj_set_style_bg_opa(mouth_inner_, LV_OPA_80, 0);
+                        lv_obj_set_size(mouth_inner_, inner_w, inner_h);
+                        lv_obj_set_pos(mouth_inner_, 120 - inner_w / 2, my + mouth_h - inner_h - 1);
+                        lv_obj_set_style_radius(mouth_inner_, inner_h / 2, 0);
+                    } else {
+                        lv_obj_set_style_bg_opa(mouth_inner_, LV_OPA_0, 0);
+                    }
+                }
+
+                if (hide_corners) {
                     lv_obj_set_style_bg_opa(mouth_corner_l_, LV_OPA_0, 0);
                     lv_obj_set_style_bg_opa(mouth_corner_r_, LV_OPA_0, 0);
                 } else {
                     lv_obj_set_style_bg_opa(mouth_corner_l_, LV_OPA_COVER, 0);
                     lv_obj_set_style_bg_opa(mouth_corner_r_, LV_OPA_COVER, 0);
-                    lv_obj_set_pos(mouth_corner_l_, mx - 6, MOUTH_Y + corner_y_offset - 2);
-                    lv_obj_set_pos(mouth_corner_r_, mx + mouth_w - 2, MOUTH_Y + corner_y_offset - 2);
+                    lv_obj_set_pos(mouth_corner_l_, mx - 6, MOUTH_Y + corner_l_y - 2);
+                    lv_obj_set_pos(mouth_corner_r_, mx + mouth_w - 2, MOUTH_Y + corner_r_y - 2);
                 }
             }
         }
@@ -863,62 +1090,31 @@ public:
         DisplayLockGuard lock(this);
         emotion_ = emotion;
 
+        // Cohesive High-Contrast Palette (No jarring full-screen yellow!)
+        // Happy, Speaking, Winking, and Neutral retain signature Electric Cyan (0x00E5FF)
+        // while using warm coral-pink cheek blushes and inner tongue accents for warmth.
         if (emotion_ == "listening") {
-            color_ = 0x00FF66; // Electric Lime Green
-        } else if (emotion_ == "thinking") {
-            color_ = 0xD500F9; // Cyberpunk Vivid Magenta
-        } else if (emotion_ == "speaking") {
-            color_ = 0xFFB300; // Warm Solar Amber
-        } else if (emotion_ == "happy" || emotion_ == "laughing" || emotion_ == "funny") {
-            color_ = 0xFFEA00; // Radiant Lemon Gold
+            color_ = 0x00FFAA; // Neon Mint-Aqua
+        } else if (emotion_ == "thinking" || emotion_ == "confused") {
+            color_ = 0xB388FF; // Sleek Cyber Lavender-Purple
         } else if (emotion_ == "sad" || emotion_ == "crying") {
-            color_ = 0x2979FF; // Deep Cerulean Blue
+            color_ = 0x2979FF; // Deep Ocean Blue
         } else if (emotion_ == "angry") {
             color_ = 0xFF1744; // Fiery Crimson Red
         } else if (emotion_ == "sleepy" || emotion_ == "tired") {
-            color_ = 0x80D8FF; // Soft Dreamy Ice Blue
-        } else if (emotion_ == "loving" || emotion_ == "heart" || emotion_ == "shy") {
-            color_ = 0xFF4081; // Electric Rose Pink
+            color_ = 0x40C4FF; // Soft Dreamy Ice Blue
+        } else if (emotion_ == "loving" || emotion_ == "heart" || emotion_ == "kissy") {
+            color_ = 0xFF4081; // Warm Rose Pink
         } else if (emotion_ == "shocked" || emotion_ == "surprised") {
-            color_ = 0xFF6D00; // Intense Neon Orange
-        } else if (emotion_ == "chill" || emotion_ == "relaxed") {
-            color_ = 0x00E676; // Mint Turquoise
-        } else { // neutral / idle
-            color_ = 0x00E5FF; // High-Tech Neon Cyan
+            color_ = 0x18FFFF; // Bright Electric Ice Cyan
+        } else if (emotion_ == "chill" || emotion_ == "relaxed" || emotion_ == "cool") {
+            color_ = 0x00E676; // Crisp Neon Mint
+        } else {
+            // neutral, speaking, happy, laughing, funny, winking, confident, silly, delicious, embarrassed
+            color_ = 0x00E5FF; // Signature High-Tech Neon Cyan
         }
 
-        lv_color_t col = lv_color_hex(color_);
-
-        // Update Ears & Whiskers Color
-        if (ear_l_ && ear_r_) {
-            lv_obj_set_style_bg_color(ear_l_, col, 0);
-            lv_obj_set_style_bg_color(ear_r_, col, 0);
-        }
-        if (whisker_l1_ && whisker_l2_ && whisker_r1_ && whisker_r2_) {
-            lv_obj_set_style_bg_color(whisker_l1_, col, 0);
-            lv_obj_set_style_bg_color(whisker_l2_, col, 0);
-            lv_obj_set_style_bg_color(whisker_r1_, col, 0);
-            lv_obj_set_style_bg_color(whisker_r2_, col, 0);
-        }
-
-        // Update Eyes & Glow
-        if (left_eye_ && right_eye_) {
-            lv_obj_set_style_bg_color(left_eye_, col, 0);
-            lv_obj_set_style_bg_color(right_eye_, col, 0);
-            lv_obj_set_style_shadow_color(left_eye_, col, 0);
-            lv_obj_set_style_shadow_color(right_eye_, col, 0);
-        }
-
-        // Update Mouth & Wave Bars
-        if (mouth_ && mouth_corner_l_ && mouth_corner_r_) {
-            lv_obj_set_style_bg_color(mouth_, col, 0);
-            lv_obj_set_style_bg_color(mouth_corner_l_, col, 0);
-            lv_obj_set_style_bg_color(mouth_corner_r_, col, 0);
-            lv_obj_set_style_shadow_color(mouth_, col, 0);
-        }
-        for (int i = 0; i < 5; ++i) {
-            if (wave_bar_[i]) lv_obj_set_style_bg_color(wave_bar_[i], col, 0);
-        }
+        ApplyColor(color_);
         return true;
     }
 
